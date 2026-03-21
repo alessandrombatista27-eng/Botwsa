@@ -359,7 +359,7 @@ client.on("interactionCreate", async interaction => {
 
     if(customId==="ticket_select") {
       await replyRaw(interaction,{flags:CV2|EPH,components:[
-        container([txt("## 📋 Regras do Canal de Tickets\n\n- Abra tickets apenas quando necessário\n- Explique o assunto de forma clara e objetiva\n- Não faça spam nem cobre respostas da staff\n- Tickets sem resposta por **12 horas** serão fechados\n- Mantenha o respeito em todas as situações\n- Em denúncias, envie provas *(prints, vídeos, links)*\n- Em denúncias por racismo, o usuário precisa estar no servidor\n\n⚠️ O descumprimento pode resultar em fechamento do ticket ou punições."),{type:11,items:[{media:{url:REGRAS_IMG}}]}]),
+        container([txt("## 📋 Regras do Canal de Tickets\n\n- Abra tickets apenas quando necessário\n- Explique o assunto de forma clara e objetiva\n- Não faça spam nem cobre respostas da staff\n- Tickets sem resposta por **12 horas** serão fechados\n- Mantenha o respeito em todas as situações\n- Em denúncias, envie provas *(prints, vídeos, links)*\n- Em denúncias por racismo, o usuário precisa estar no servidor\n\n⚠️ O descumprimento pode resultar em fechamento do ticket ou punições.")]),
         rowConfirmar(values[0]),
       ]});
     }
