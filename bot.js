@@ -39,8 +39,8 @@ const CATEGORIAS = {
 
 const ticketsAssumidos = new Map();
 
-// ── REST instance (inicializado no ready)
-let rest;
+// ── REST instance — inicializado direto
+const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 // ── Wrappers REST direto — bypass discord.js MessagePayload
 const sendRaw     = (chId, body)        => rest.post(Routes.channelMessages(chId), { body });
@@ -401,7 +401,6 @@ client.on("interactionCreate", async interaction => {
 // READY
 // ──────────────────────────────────────────────
 client.once("clientReady", async () => {
-  rest = new REST({ version: "10" }).setToken(TOKEN);
   console.log(`✅ Bot online como: ${client.user.tag}`);
   try {
     await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
