@@ -3,7 +3,7 @@ const {
   SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
-  PermissionFlagsBits,
+  PermissionFlagsBits, MessageFlags,
 } = require("discord.js");
 const fs   = require("fs");
 const path = require("path");
@@ -30,10 +30,6 @@ const CONTRACT_EXPIRY_H = 24;
 const DB_FILE           = path.join(__dirname, "contracts.json");
 const LINK_BLOQUEADO    = /https?:\/\/(www\.)?roblox\.com\/share\?code=/i;
 
-// flags numéricas
-const FLAG_CV2      = 1 << 15; // IsComponentsV2 = 32768
-const FLAG_EPHEMERAL = 1 << 6;  // Ephemeral = 64
-
 const CATEGORIAS = {
   duvidas:     { label: "Dúvidas",    description: "Perguntas gerais sobre a liga ou o servidor.", emoji: "🤔" },
   parcerias:   { label: "Parcerias",   description: "Propostas de parceria e divulgações.",         emoji: "🤝" },
@@ -55,19 +51,22 @@ function saveDB(data) { fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2))
 function gerarContractId(sId, cId) { return `WSA${sId}_${cId}_${Date.now()}`; }
 
 // ──────────────────────────────────────────────
-// COMPONENTS V2 — raw JSON helpers
+// COMPONENTS V2 — raw JSON
 // ──────────────────────────────────────────────
-const txt  = (content)          => ({ type: 10, content });
-const sep  = ()                 => ({ type: 14, divider: true, spacing: 1 });
-const thumb= (url)              => ({ type: 11, items: [{ media: { url } }] });
+const txt   = (content) => ({ type: 10, content });
+const sep   = ()        => ({ type: 14, divider: true, spacing: 1 });
+const thumb = (url)     => ({ type: 11, items: [{ media: { url } }] });
 const container = (comps, color = 0xFF6600) => ({ type: 17, accent_color: color, components: comps });
 
-// Monta payload CV2
-function cv2pay(components, ephemeral = false) {
-  return { flags: FLAG_CV2 | (ephemeral ? FLAG_EPHEMERAL : 0), components };
+// Payload CV2 — flags como número para compatibilidade
+const CV2  = 1 << 15; // 32768
+const EPH  = 1 << 6;  // 64
+
+function cv2(comps, ephemeral = false) {
+  return { flags: CV2 | (ephemeral ? EPH : 0), components: comps };
 }
 
-// Botões via builder (não CV2, ficam fora do container)
+// ── Rows (discord.js builders → toJSON)
 const rowBotoesTicket = () => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId("btn_fechar_ticket").setLabel("🔒 Fechar Ticket").setStyle(ButtonStyle.Danger),
   new ButtonBuilder().setCustomId("btn_painel_membro").setLabel("👤 Painel Membro").setStyle(ButtonStyle.Secondary),
@@ -80,24 +79,23 @@ const rowBotoesContrato = () => new ActionRowBuilder().addComponents(
 ).toJSON();
 
 const rowDropdownTicket = () => new ActionRowBuilder().addComponents(
-  new StringSelectMenuBuilder().setCustomId("ticket_select").setPlaceholder("Selecione uma opção:").addOptions(
-    Object.entries(CATEGORIAS).map(([k, c]) =>
+  new StringSelectMenuBuilder().setCustomId("ticket_select").setPlaceholder("Selecione uma opção:")
+    .addOptions(Object.entries(CATEGORIAS).map(([k, c]) =>
       new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.description).setEmoji(c.emoji).setValue(k)
-    )
-  )
+    ))
 ).toJSON();
 
 const rowDropdownMembro = () => new ActionRowBuilder().addComponents(
-  new StringSelectMenuBuilder().setCustomId("painel_membro_select").setPlaceholder("Selecione o que deseja fazer").addOptions(
-    new StringSelectMenuOptionBuilder().setLabel("Notificar Staff").setDescription("Envia um ping para quem está atendendo o ticket.").setEmoji("🔔").setValue("notificar_staff")
-  )
+  new StringSelectMenuBuilder().setCustomId("painel_membro_select").setPlaceholder("Selecione o que deseja fazer")
+    .addOptions(new StringSelectMenuOptionBuilder().setLabel("Notificar Staff").setDescription("Envia um ping para quem está atendendo o ticket.").setEmoji("🔔").setValue("notificar_staff"))
 ).toJSON();
 
 const rowDropdownStaff = () => new ActionRowBuilder().addComponents(
-  new StringSelectMenuBuilder().setCustomId("painel_staff_select").setPlaceholder("Selecione o que deseja fazer").addOptions(
-    new StringSelectMenuOptionBuilder().setLabel("Notificar Membro").setDescription("Envia um ping para o membro no canal.").setEmoji("📣").setValue("notificar_membro"),
-    new StringSelectMenuOptionBuilder().setLabel("Assumir Ticket").setDescription("Marca você como responsável por este ticket.").setEmoji("✋").setValue("assumir_ticket"),
-  )
+  new StringSelectMenuBuilder().setCustomId("painel_staff_select").setPlaceholder("Selecione o que deseja fazer")
+    .addOptions(
+      new StringSelectMenuOptionBuilder().setLabel("Notificar Membro").setDescription("Envia um ping para o membro no canal.").setEmoji("📣").setValue("notificar_membro"),
+      new StringSelectMenuOptionBuilder().setLabel("Assumir Ticket").setDescription("Marca você como responsável por este ticket.").setEmoji("✋").setValue("assumir_ticket"),
+    )
 ).toJSON();
 
 const rowConfirmarTicket = (key) => new ActionRowBuilder().addComponents(
@@ -113,30 +111,28 @@ const rowAvaliacao = () => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId("aval_5").setLabel("⭐ 5").setStyle(ButtonStyle.Success),
 ).toJSON();
 
-// ── Payloads de contrato
+// ── Payloads prontos
 function payContratoPendente(c) {
   const issued  = new Date(c.created_at * 1000).toLocaleString("pt-BR");
   const expires = new Date(c.expires_at * 1000).toLocaleString("pt-BR");
-  return {
-    ...cv2pay([
-      container([
-        thumb(LOGO_URL),
-        txt(`## 📋 Proposta de Contrato — WSA League`),
-        sep(),
-        txt(`**Contratado:** <@${c.signee_id}> \`${c.signee_name}\`\n**Contratante:** <@${c.contractor_id}> \`${c.contractor_name}\`\n**Contract ID:** \`${c.contract_id}\`\n\n**Time:** ${c.team}\n**Posição:** ${c.position}\n**Cargo:** ${c.role}\n\n*Emitido: ${issued} • Expira: ${expires}*`),
-      ]),
-      rowBotoesContrato(),
+  return cv2([
+    container([
+      thumb(LOGO_URL),
+      txt(`## 📋 Proposta de Contrato — WSA League`),
+      sep(),
+      txt(`**Contratado:** <@${c.signee_id}> \`${c.signee_name}\`\n**Contratante:** <@${c.contractor_id}> \`${c.contractor_name}\`\n**Contract ID:** \`${c.contract_id}\`\n\n**Time:** ${c.team}\n**Posição:** ${c.position}\n**Cargo:** ${c.role}\n\n*Emitido: ${issued} • Expira: ${expires}*`),
     ]),
-  };
+    rowBotoesContrato(),
+  ]);
 }
 function payContratoAceito(c) {
-  return cv2pay([container([txt(`## ✅ Contrato Aceito\n\n<@${c.signee_id}> aceitou e agora faz parte do time **${c.team}**!\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``), ], 0x2ECC71)]);
+  return cv2([container([txt(`## ✅ Contrato Aceito\n\n<@${c.signee_id}> aceitou e agora faz parte do time **${c.team}**!\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``)], 0x2ECC71)]);
 }
 function payContratoRecusado(c) {
-  return cv2pay([container([txt(`## ❌ Contrato Recusado\n\n<@${c.signee_id}> recusou a proposta.\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``)], 0x95A5A6)]);
+  return cv2([container([txt(`## ❌ Contrato Recusado\n\n<@${c.signee_id}> recusou a proposta.\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``)], 0x95A5A6)]);
 }
 function payContratoExpirado(c) {
-  return cv2pay([container([txt(`## ⏰ Contrato Expirado\n\nEste contrato expirou. Peça ao manager para enviar uma nova proposta.\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``)], 0x992D22)]);
+  return cv2([container([txt(`## ⏰ Contrato Expirado\n\nEste contrato expirou.\n\n**Contratado:** <@${c.signee_id}>\n**Contratante:** <@${c.contractor_id}>\n**ID:** \`${c.contract_id}\``)], 0x992D22)]);
 }
 
 function pegarDonoId(topic) {
@@ -156,12 +152,15 @@ async function criarCanalTicket(interaction, categoriaKey) {
   const nome  = `${categoriaKey.replace("_","-")}-${interaction.user.username.toLowerCase().replace(/\s+/g,"-")}`;
 
   const existente = guild.channels.cache.find(c => c.name === nome);
-  if (existente) { await interaction.followUp({ content: `❌ Você já tem um ticket em ${existente}!`, flags: FLAG_EPHEMERAL }); return; }
+  if (existente) {
+    await interaction.followUp({ content: `❌ Você já tem um ticket em ${existente}!`, flags: EPH });
+    return;
+  }
 
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-    { id: guild.members.me.id,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory] },
+    { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory] },
   ];
   for (const id of CARGOS_SUPORTE) {
     if (guild.roles.cache.has(id)) overwrites.push({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
@@ -177,29 +176,30 @@ async function criarCanalTicket(interaction, categoriaKey) {
   const mencoes = CARGOS_SUPORTE.map(id => `<@&${id}>`).join(" ");
   await canal.send({
     content: `<@${interaction.user.id}> ${mencoes}`,
-    ...cv2pay([
+    flags: CV2,
+    components: [
       container([
         thumb(LOGO_URL),
         txt(`# ${cat.emoji} ${cat.label}\n\nOlá <@${interaction.user.id}>! A equipe de suporte irá te atender em breve.\n\n**Categoria:** ${cat.emoji} ${cat.label}\n**Descrição:** ${cat.description}\n\nDescreva sua situação com o máximo de detalhes possível.\n\n⏰ Horário de atendimento: **08:00 às 22:00**`),
       ]),
       rowBotoesTicket(),
-    ]),
+    ],
   });
 
-  await interaction.followUp({ content: `✅ Ticket aberto em ${canal}!`, flags: FLAG_EPHEMERAL });
+  await interaction.followUp({ content: `✅ Ticket aberto em ${canal}!`, flags: EPH });
 }
 
 // ──────────────────────────────────────────────
-// SLASH COMMANDS
+// SLASH COMMANDS DEFINITION
 // ──────────────────────────────────────────────
 const commands = [
   new SlashCommandBuilder().setName("aviso").setDescription("📢 Envia um aviso oficial no canal")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("titulo").setDescription("Título do aviso").setRequired(true))
-    .addStringOption(o => o.setName("descricao").setDescription("Descrição do aviso").setRequired(true))
+    .addStringOption(o => o.setName("titulo").setDescription("Título").setRequired(true))
+    .addStringOption(o => o.setName("descricao").setDescription("Descrição").setRequired(true))
     .addChannelOption(o => o.setName("canal").setDescription("Canal de destino").setRequired(false)),
 
-  new SlashCommandBuilder().setName("ticket").setDescription("🎫 Envia o painel de ticket no canal")
+  new SlashCommandBuilder().setName("ticket").setDescription("🎫 Envia o painel de ticket")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption(o => o.setName("canal").setDescription("Canal de destino").setRequired(false)),
 
@@ -210,7 +210,7 @@ const commands = [
     .addStringOption(o => o.setName("posicao").setDescription("Posição").setRequired(true))
     .addRoleOption(o => o.setName("cargo").setDescription("Cargo de time").setRequired(true)),
 
-  new SlashCommandBuilder().setName("contratos-ativos").setDescription("📋 Veja os contratos pendentes")
+  new SlashCommandBuilder().setName("contratos-ativos").setDescription("📋 Contratos pendentes")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder().setName("historico-contratos").setDescription("📜 Histórico de contratos")
@@ -230,7 +230,7 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
-// Checar contratos expirados a cada 5 min
+// Checar contratos expirados
 setInterval(async () => {
   const db  = loadDB();
   const now = Date.now() / 1000;
@@ -239,7 +239,10 @@ setInterval(async () => {
     c.status = "expired"; db.history.push(c);
     try {
       const ch = client.channels.cache.get(String(c.channel_id));
-      if (ch && c.message_id) { const msg = await ch.messages.fetch(String(c.message_id)); await msg.edit(payContratoExpirado(c)); }
+      if (ch && c.message_id) {
+        const msg = await ch.messages.fetch(String(c.message_id));
+        await msg.edit(payContratoExpirado(c));
+      }
     } catch {}
     delete db.contracts[cid];
   }
@@ -261,7 +264,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ──────────────────────────────────────────────
-// INTERACTION HANDLER
+// INTERACTIONS
 // ──────────────────────────────────────────────
 client.on("interactionCreate", async (interaction) => {
 
@@ -269,45 +272,50 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
 
+    // /aviso
     if (cmd === "aviso") {
-      await interaction.deferReply({ flags: FLAG_EPHEMERAL });
+      await interaction.deferReply({ ephemeral: true });
       const titulo    = interaction.options.getString("titulo");
       const descricao = interaction.options.getString("descricao");
       const ch        = interaction.options.getChannel("canal") || interaction.channel;
       await ch.send({
         content: "@everyone",
-        ...cv2pay([container([thumb(LOGO_URL), txt(`# ${titulo}\n\n${descricao}`), sep(), txt(`*Aviso emitido por ${interaction.user.displayName}*`)])]),
+        flags: CV2,
+        components: [container([thumb(LOGO_URL), txt(`# ${titulo}\n\n${descricao}`), sep(), txt(`*Aviso emitido por ${interaction.user.displayName}*`)])],
       });
       await interaction.editReply({ content: `✅ Aviso enviado em ${ch}!` });
     }
 
+    // /ticket
     else if (cmd === "ticket") {
-      await interaction.deferReply({ flags: FLAG_EPHEMERAL });
+      await interaction.deferReply({ ephemeral: true });
       const ch = interaction.options.getChannel("canal") || interaction.channel;
       await ch.send({
-        ...cv2pay([
+        flags: CV2,
+        components: [
           container([
             thumb(LOGO_URL),
             txt(`# 🎫 | Ajuda e Suporte\n\n**A equipe *WSA* estará sempre pronta para atender o seu ticket, portanto, precisamos que você tenha paciência e calma ao nos relatar.**\n\n─\n\n- 🤔 **Dúvidas** — Perguntas gerais sobre a liga ou o servidor\n- 🤝 **Parcerias** — Propostas de parceria e divulgações\n- 🚨 **Denúncias** — Denunciar algum usuário do servidor\n- 🏆 **Ownar Clube** — Solicitar ownership de um clube\n- 📌 **Outros** — Outros assuntos não listados acima\n\n─\n\n> ⏳ O horário de atendimento do seu ticket será de **8:00 às 22:00**, fora esse horário a equipe não tem obrigação de responde-lo.\n\n*A equipe WSA agradece.*`),
           ]),
           rowDropdownTicket(),
-        ]),
+        ],
       });
       await interaction.editReply({ content: `✅ Painel enviado em ${ch}!` });
     }
 
+    // /contratar
     else if (cmd === "contratar") {
       if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID))
-        return interaction.reply({ content: "❌ Você precisa ter o cargo de **Manager**!", flags: FLAG_EPHEMERAL });
+        return interaction.reply({ content: "❌ Você precisa ter o cargo de **Manager**!", ephemeral: true });
       const membro   = interaction.options.getMember("membro");
       const nomeTime = interaction.options.getString("nome_time");
       const posicao  = interaction.options.getString("posicao");
       const cargo    = interaction.options.getRole("cargo");
-      if (membro.user.bot) return interaction.reply({ content: "❌ Não pode contratar um bot.", flags: FLAG_EPHEMERAL });
-      if (membro.id === interaction.user.id) return interaction.reply({ content: "❌ Não pode contratar a si mesmo.", flags: FLAG_EPHEMERAL });
+      if (membro.user.bot) return interaction.reply({ content: "❌ Não pode contratar um bot.", ephemeral: true });
+      if (membro.id === interaction.user.id) return interaction.reply({ content: "❌ Não pode contratar a si mesmo.", ephemeral: true });
       if (!CARGOS_TIMES.includes(cargo.id)) {
         const lista = CARGOS_TIMES.map(id => `<@&${id}>`).join("\n");
-        return interaction.reply({ content: `❌ Cargo inválido!\n**Cargos permitidos:**\n${lista}`, flags: FLAG_EPHEMERAL });
+        return interaction.reply({ content: `❌ Cargo inválido!\n**Cargos permitidos:**\n${lista}`, ephemeral: true });
       }
       const contractId = gerarContractId(membro.id, interaction.user.id);
       const now        = Date.now() / 1000;
@@ -320,48 +328,53 @@ client.on("interactionCreate", async (interaction) => {
       };
       const db = loadDB(); db.contracts[contractId] = c; saveDB(db);
       const chContratos = interaction.guild.channels.cache.get(CANAL_CONTRATOS_ID);
-      if (!chContratos) return interaction.reply({ content: "❌ Canal de contratos não encontrado.", flags: FLAG_EPHEMERAL });
-      let msg;
-      if (interaction.channelId !== CANAL_CONTRATOS_ID) {
-        await interaction.reply({ content: "✅ Contrato enviado!", flags: FLAG_EPHEMERAL });
-        msg = await chContratos.send({ content: `${membro}, você recebeu uma proposta de contrato de ${interaction.user}!`, ...payContratoPendente(c) });
-      } else {
-        await interaction.reply({ content: `${membro}, você recebeu uma proposta de contrato de ${interaction.user}!`, ...payContratoPendente(c) });
-        msg = await interaction.fetchReply();
-      }
-      const db2 = loadDB(); if (db2.contracts[contractId]) { db2.contracts[contractId].message_id = msg.id; saveDB(db2); }
+      if (!chContratos) return interaction.reply({ content: "❌ Canal de contratos não encontrado.", ephemeral: true });
+
+      // Responde confirmação ephemeral e envia no canal de contratos
+      await interaction.reply({ content: "✅ Contrato enviado!", ephemeral: true });
+      const payload = payContratoPendente(c);
+      const msg = await chContratos.send({
+        content: `${membro}, você recebeu uma proposta de contrato de ${interaction.user}!`,
+        flags: payload.flags,
+        components: payload.components,
+      });
+      const db2 = loadDB();
+      if (db2.contracts[contractId]) { db2.contracts[contractId].message_id = msg.id; saveDB(db2); }
     }
 
+    // /contratos-ativos
     else if (cmd === "contratos-ativos") {
       if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content: "❌ Sem permissão.", flags: FLAG_EPHEMERAL });
+        return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
       const db      = loadDB();
       const pending = Object.values(db.contracts).filter(c => c.status === "pending");
-      if (!pending.length) return interaction.reply({ content: "✅ Nenhum contrato pendente.", flags: FLAG_EPHEMERAL });
+      if (!pending.length) return interaction.reply({ content: "✅ Nenhum contrato pendente.", ephemeral: true });
       const linhas = pending.map(c => `🔸 **${c.team}** — ${c.position}\n<@${c.signee_id}> ← <@${c.contractor_id}>\nExpira: \`${new Date(c.expires_at*1000).toLocaleString("pt-BR")}\``).join("\n\n");
-      await interaction.reply({ ...cv2pay([container([txt(`## ⏳ Contratos Pendentes — WSA League\n\n${linhas}`)])], true) });
+      await interaction.reply({ flags: CV2 | EPH, components: [container([txt(`## ⏳ Contratos Pendentes — WSA League\n\n${linhas}`)])] });
     }
 
+    // /historico-contratos
     else if (cmd === "historico-contratos") {
       const db  = loadDB();
       let hist  = db.history || [];
       const u   = interaction.options.getUser("membro");
       if (u) hist = hist.filter(c => c.signee_id === u.id || c.contractor_id === u.id);
-      if (!hist.length) return interaction.reply({ content: "📭 Nenhum contrato encontrado.", flags: FLAG_EPHEMERAL });
+      if (!hist.length) return interaction.reply({ content: "📭 Nenhum contrato encontrado.", ephemeral: true });
       const emj = { accepted:"✅", declined:"❌", expired:"⏰", cancelled:"🗑️" };
       const linhas = hist.slice(-10).reverse().map(c => `${emj[c.status]||"❓"} **${c.team||"—"}** — ${c.position||"—"}\n<@${c.signee_id}> ← <@${c.contractor_id}> \`${c.status.toUpperCase()}\``).join("\n\n");
-      await interaction.reply({ ...cv2pay([container([txt(`## 📋 Histórico de Contratos — WSA League\n\n${linhas}`)])], true) });
+      await interaction.reply({ flags: CV2 | EPH, components: [container([txt(`## 📋 Histórico de Contratos — WSA League\n\n${linhas}`)])] });
     }
 
+    // /cancelar-contrato
     else if (cmd === "cancelar-contrato") {
       const cid = interaction.options.getString("contract_id");
       const db  = loadDB();
       const c   = db.contracts[cid];
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: FLAG_EPHEMERAL });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
       const ok = interaction.user.id === c.contractor_id || interaction.member.roles.cache.has(MANAGER_ROLE_ID) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-      if (!ok) return interaction.reply({ content: "❌ Apenas quem enviou pode cancelar.", flags: FLAG_EPHEMERAL });
+      if (!ok) return interaction.reply({ content: "❌ Apenas quem enviou pode cancelar.", ephemeral: true });
       c.status = "cancelled"; db.history.push(c); delete db.contracts[cid]; saveDB(db);
-      await interaction.reply({ content: `🗑️ Contrato \`${cid}\` cancelado.`, flags: FLAG_EPHEMERAL });
+      await interaction.reply({ content: `🗑️ Contrato \`${cid}\` cancelado.`, ephemeral: true });
     }
   }
 
@@ -372,45 +385,51 @@ client.on("interactionCreate", async (interaction) => {
     if (id === "btn_aceitar_contrato") {
       const db = loadDB();
       const c  = Object.values(db.contracts).find(x => x.message_id === interaction.message.id);
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: FLAG_EPHEMERAL });
-      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode aceitar.", flags: FLAG_EPHEMERAL });
-      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", flags: FLAG_EPHEMERAL });
-      if (Date.now()/1000 > c.expires_at) return interaction.reply({ content: "⏰ Contrato expirado.", flags: FLAG_EPHEMERAL });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
+      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode aceitar.", ephemeral: true });
+      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", ephemeral: true });
+      if (Date.now()/1000 > c.expires_at) return interaction.reply({ content: "⏰ Contrato expirado.", ephemeral: true });
       c.status = "accepted"; c.answered_at = Date.now()/1000; db.history.push(c); delete db.contracts[c.contract_id]; saveDB(db);
       const member = interaction.guild.members.cache.get(c.signee_id);
       const role   = interaction.guild.roles.cache.get(String(c.role_id));
       if (member && role) await member.roles.add(role).catch(()=>{});
-      await interaction.message.edit(payContratoAceito(c));
+      const pay = payContratoAceito(c);
+      await interaction.message.edit({ flags: pay.flags, components: pay.components });
       await interaction.reply({ content: `🎉 ${interaction.user} aceitou o contrato e foi contratado para o time **${c.team}**!` });
     }
 
     else if (id === "btn_recusar_contrato") {
       const db = loadDB();
       const c  = Object.values(db.contracts).find(x => x.message_id === interaction.message.id);
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: FLAG_EPHEMERAL });
-      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode recusar.", flags: FLAG_EPHEMERAL });
-      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", flags: FLAG_EPHEMERAL });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
+      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode recusar.", ephemeral: true });
+      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", ephemeral: true });
       c.status = "declined"; c.answered_at = Date.now()/1000; db.history.push(c); delete db.contracts[c.contract_id]; saveDB(db);
-      await interaction.message.edit(payContratoRecusado(c));
+      const pay = payContratoRecusado(c);
+      await interaction.message.edit({ flags: pay.flags, components: pay.components });
       await interaction.reply({ content: `❌ ${interaction.user} recusou o contrato.` });
     }
 
     else if (id === "btn_fechar_ticket") {
       const ehSuporte = CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id));
       const ehAdmin   = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-      if (!ehSuporte && !ehAdmin) return interaction.reply({ content: "❌ Apenas a staff pode fechar o ticket!", flags: FLAG_EPHEMERAL });
+      if (!ehSuporte && !ehAdmin) return interaction.reply({ content: "❌ Apenas a staff pode fechar o ticket!", ephemeral: true });
       ticketsAssumidos.delete(interaction.channelId);
-      const donoId   = pegarDonoId(interaction.channel.topic || "");
+      const donoId    = pegarDonoId(interaction.channel.topic || "");
       const canalNome = interaction.channel.name;
-      await interaction.reply({ ...cv2pay([container([txt(`🔒 Ticket fechado por ${interaction.user}.\nO canal será deletado em **5 segundos**.`)], 0xFF4444)]) });
+      await interaction.reply({
+        flags: CV2,
+        components: [container([txt(`🔒 Ticket fechado por ${interaction.user}.\nO canal será deletado em **5 segundos**.`)], 0xFF4444)],
+      });
       if (donoId) {
         try {
           const membro = interaction.guild.members.cache.get(donoId);
           if (membro) await membro.send({
-            ...cv2pay([
+            flags: CV2,
+            components: [
               container([thumb(LOGO_URL), txt(`## 🔒 Seu Ticket Foi Encerrado\n\n**Ticket:** \`${canalNome}\`\n**Fechado por:** ${interaction.user}\n**Data:** ${new Date().toLocaleString("pt-BR")}\n\n⭐ **Como foi o nosso atendimento?**\nClique em uma estrela abaixo e escreva o motivo da sua nota:`)]),
               rowAvaliacao(),
-            ]),
+            ],
           });
         } catch {}
       }
@@ -419,15 +438,21 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (id === "btn_painel_membro") {
       if (CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id)))
-        return interaction.reply({ content: "❌ Este painel é exclusivo para membros!", flags: FLAG_EPHEMERAL });
-      await interaction.reply({ ...cv2pay([container([txt("👤 **Painel Membro**\n\nUse as opções abaixo para interagir com a staff:")], 0x5865F2), rowDropdownMembro()], true) });
+        return interaction.reply({ content: "❌ Este painel é exclusivo para membros!", ephemeral: true });
+      await interaction.reply({
+        flags: CV2 | EPH,
+        components: [container([txt("👤 **Painel Membro**\n\nUse as opções abaixo para interagir com a staff:")], 0x5865F2), rowDropdownMembro()],
+      });
     }
 
     else if (id === "btn_painel_staff") {
       const ehSuporte = CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id));
       if (!ehSuporte && !interaction.member.permissions.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content: "❌ Este painel é exclusivo para a staff!", flags: FLAG_EPHEMERAL });
-      await interaction.reply({ ...cv2pay([container([txt("👮 **Painel Staff**\n\nUse as opções abaixo para interagir com o membro:")]), rowDropdownStaff()], true) });
+        return interaction.reply({ content: "❌ Este painel é exclusivo para a staff!", ephemeral: true });
+      await interaction.reply({
+        flags: CV2 | EPH,
+        components: [container([txt("👮 **Painel Staff**\n\nUse as opções abaixo para interagir com o membro:")]), rowDropdownStaff()],
+      });
     }
 
     else if (id.startsWith("confirmar_ticket:")) {
@@ -436,7 +461,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     else if (id === "cancelar_ticket") {
-      await interaction.update({ content: "❌ Abertura de ticket cancelada.", components: [], flags: FLAG_EPHEMERAL });
+      await interaction.update({ content: "❌ Abertura de ticket cancelada.", components: [], flags: EPH });
     }
 
     else if (id.startsWith("aval_")) {
@@ -457,15 +482,15 @@ client.on("interactionCreate", async (interaction) => {
     const { customId, values } = interaction;
 
     if (customId === "ticket_select") {
-      const key = values[0];
       await interaction.reply({
-        ...cv2pay([
+        flags: CV2 | EPH,
+        components: [
           container([
             txt(`## 📋 Regras do Canal de Tickets\n\n- Abra tickets apenas quando necessário\n- Explique o assunto de forma clara e objetiva\n- Não faça spam nem cobre respostas da staff\n- Tickets sem resposta por **12 horas** serão fechados\n- Mantenha o respeito em todas as situações\n- Em denúncias, envie provas *(prints, vídeos, links)*\n- Em denúncias por racismo, o usuário precisa estar no servidor\n\n⚠️ O descumprimento pode resultar em fechamento do ticket ou punições.`),
             { type: 11, items: [{ media: { url: REGRAS_IMG } }] },
           ]),
-          rowConfirmarTicket(key),
-        ], true),
+          rowConfirmarTicket(values[0]),
+        ],
       });
     }
 
@@ -487,7 +512,7 @@ client.on("interactionCreate", async (interaction) => {
         const cid = interaction.channelId;
         if (ticketsAssumidos.has(cid)) {
           const rid = ticketsAssumidos.get(cid);
-          return interaction.reply({ content: rid === interaction.user.id ? "⚠️ Você já é o responsável!" : `⚠️ Este ticket já foi assumido por <@${rid}>!`, flags: FLAG_EPHEMERAL });
+          return interaction.reply({ content: rid === interaction.user.id ? "⚠️ Você já é o responsável!" : `⚠️ Este ticket já foi assumido por <@${rid}>!`, ephemeral: true });
         }
         ticketsAssumidos.set(cid, interaction.user.id);
         const donoId = pegarDonoId(interaction.channel.topic || "");
@@ -510,9 +535,12 @@ client.on("interactionCreate", async (interaction) => {
       const guild = client.guilds.cache.get(GUILD_ID);
       if (guild) {
         const ch = guild.channels.cache.get(CANAL_LOGS_AVAL);
-        if (ch) await ch.send({ ...cv2pay([container([txt(`## ⭐ Nova Avaliação de Ticket\n\n**Usuário:** <@${donoId}>\n**Nota:** ${estrelas} \`${nota}/5\` — ${descricoes[nota-1]}\n\n**Comentário:**\n> ${comentario}\n\n*${new Date().toLocaleString("pt-BR")}*`)], cores[nota-1])]) });
+        if (ch) await ch.send({
+          flags: CV2,
+          components: [container([txt(`## ⭐ Nova Avaliação de Ticket\n\n**Usuário:** <@${donoId}>\n**Nota:** ${estrelas} \`${nota}/5\` — ${descricoes[nota-1]}\n\n**Comentário:**\n> ${comentario}\n\n*${new Date().toLocaleString("pt-BR")}*`)], cores[nota-1])],
+        });
       }
-      await interaction.reply({ content: "✅ Obrigado pela sua avaliação!", flags: FLAG_EPHEMERAL });
+      await interaction.reply({ content: "✅ Obrigado pela sua avaliação!", ephemeral: true });
     }
   }
 });
