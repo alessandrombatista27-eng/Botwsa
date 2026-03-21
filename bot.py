@@ -5,13 +5,12 @@ import datetime
 import json
 import os
 import time
+import re
 
 # ──────────────────────────────────────────────
 # CONFIGURAÇÃO
 # ──────────────────────────────────────────────
-import os
-
-TOKEN    = os.getenv("DISCORD_TOKEN")  # defina a variável de ambiente DISCORD_TOKEN
+TOKEN    = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1482896148502020206
 
 LOGO_URL = (
@@ -27,13 +26,20 @@ CARGOS_SUPORTE = [
     1483576833600393317,
     1483576834544369794,
 ]
-CATEGORIA_TICKETS_ID = 1483980064910606386
+CATEGORIA_TICKETS_ID  = 1483980064910606386
+CANAL_LOGS_AVALIACOES = 1484560745919414354
 
 # ── Contratação
-MANAGER_ROLE_ID      = 1483576846233764042  # cargo que pode contratar
-CANAL_CONTRATOS_ID   = 1483577088568201408  # canal onde os contratos são enviados
+MANAGER_ROLE_ID      = 1483576846233764042
+CANAL_CONTRATOS_ID   = 1483577088568201408
 CONTRACT_EXPIRY_HOURS = 24
 DB_FILE = "contracts.json"
+
+# ── Anti-link
+LINK_BLOQUEADO = re.compile(
+    r"https?://(www\.)?roblox\.com/share\?code=",
+    re.IGNORECASE,
+)
 
 CATEGORIAS = {
     "duvidas":     {"label": "Dúvidas",    "description": "Perguntas gerais sobre a liga ou o servidor.", "emoji": "🤔"},
@@ -43,15 +49,65 @@ CATEGORIAS = {
     "outros":      {"label": "Outros",      "description": "Outros assuntos não listados acima.",          "emoji": "📌"},
 }
 
+CARGOS_TIMES = [
+    1484546866233344111,
+    1484546933115715636,
+    1484546961184129024,
+    1484546994797023313,
+    1484547020260905130,
+    1484547051889885356,
+    1484547078624514131,
+    1484547111264456797,
+]
+
 tickets_assumidos: dict[int, int] = {}
 
 # ──────────────────────────────────────────────
 # BOT
 # ──────────────────────────────────────────────
 intents = discord.Intents.default()
-intents.guilds  = True
-intents.members = True
+intents.guilds   = True
+intents.members  = True
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+# ══════════════════════════════════════════════
+# ANTI-LINK — on_message
+# ══════════════════════════════════════════════
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # Ignora admins e suporte
+    if message.guild:
+        member = message.guild.get_member(message.author.id)
+        if member:
+            eh_suporte = any(r.id in CARGOS_SUPORTE for r in member.roles)
+            eh_admin   = member.guild_permissions.administrator
+            if eh_suporte or eh_admin:
+                await bot.process_commands(message)
+                return
+
+    if LINK_BLOQUEADO.search(message.content):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        aviso = await message.channel.send(
+            f"🚫 {message.author.mention} links de convite do Roblox não são permitidos neste servidor!"
+        )
+        await discord.utils.sleep_until(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=5)
+        )
+        try:
+            await aviso.delete()
+        except Exception:
+            pass
+        return
+
+    await bot.process_commands(message)
 
 
 # ══════════════════════════════════════════════
@@ -75,47 +131,41 @@ def gerar_contract_id(signee_id, contractor_id):
 # ══════════════════════════════════════════════
 # EMBEDS — CONTRATOS
 # ══════════════════════════════════════════════
-def embed_contrato_pendente(c: dict) -> discord.Embed:
+def embed_contrato_pendente(c):
     embed = discord.Embed(color=0xFF6600)
     embed.set_author(name="📋 Proposta de Contrato — WSA League", icon_url=LOGO_URL)
-    embed.add_field(name="Contratado",   value=f"<@{c['signee_id']}>\n`{c['signee_name']}`",         inline=True)
-    embed.add_field(name="Contratante",  value=f"<@{c['contractor_id']}>\n`{c['contractor_name']}`", inline=True)
-    embed.add_field(name="Contract ID",  value=f"`{c['contract_id']}`",                               inline=True)
-    embed.add_field(name="Time",         value=c.get("team", "—"),                                    inline=True)
-    embed.add_field(name="Posição",      value=c.get("position", "—"),                                inline=True)
-    embed.add_field(name="Cargo",        value=c.get("role", "—"),                                    inline=True)
+    embed.add_field(name="Contratado",  value=f"<@{c['signee_id']}>\n`{c['signee_name']}`",         inline=True)
+    embed.add_field(name="Contratante", value=f"<@{c['contractor_id']}>\n`{c['contractor_name']}`", inline=True)
+    embed.add_field(name="Contract ID", value=f"`{c['contract_id']}`",                               inline=True)
+    embed.add_field(name="Time",        value=c.get("team", "—"),                                    inline=True)
+    embed.add_field(name="Posição",     value=c.get("position", "—"),                                inline=True)
+    embed.add_field(name="Cargo",       value=c.get("role", "—"),                                    inline=True)
     issued  = datetime.datetime.fromtimestamp(c["created_at"]).strftime("%d/%m/%Y %H:%M")
     expires = datetime.datetime.fromtimestamp(c["expires_at"]).strftime("%d/%m/%Y %H:%M")
     embed.set_footer(text=f"WSA League  •  Emitido: {issued}  •  Expira: {expires}")
     return embed
 
-def embed_aceito(c: dict) -> discord.Embed:
-    embed = discord.Embed(
-        color=0x2ECC71, title="✅ Contrato Aceito",
-        description=f"<@{c['signee_id']}> aceitou o contrato e agora faz parte do time **{c.get('team','—')}**!"
-    )
+def embed_aceito(c):
+    embed = discord.Embed(color=0x2ECC71, title="✅ Contrato Aceito",
+        description=f"<@{c['signee_id']}> aceitou o contrato e agora faz parte do time **{c.get('team','—')}**!")
     embed.add_field(name="Contratado",  value=f"<@{c['signee_id']}>\n`{c['signee_name']}`",         inline=True)
     embed.add_field(name="Contratante", value=f"<@{c['contractor_id']}>\n`{c['contractor_name']}`", inline=True)
     embed.add_field(name="Contract ID", value=f"`{c['contract_id']}`",                               inline=True)
     embed.set_footer(text="WSA League")
     return embed
 
-def embed_recusado(c: dict) -> discord.Embed:
-    embed = discord.Embed(
-        color=0x95A5A6, title="❌ Contrato Recusado",
-        description=f"<@{c['signee_id']}> recusou a proposta de contrato."
-    )
+def embed_recusado(c):
+    embed = discord.Embed(color=0x95A5A6, title="❌ Contrato Recusado",
+        description=f"<@{c['signee_id']}> recusou a proposta de contrato.")
     embed.add_field(name="Contratado",  value=f"<@{c['signee_id']}>\n`{c['signee_name']}`",         inline=True)
     embed.add_field(name="Contratante", value=f"<@{c['contractor_id']}>\n`{c['contractor_name']}`", inline=True)
     embed.add_field(name="Contract ID", value=f"`{c['contract_id']}`",                               inline=True)
     embed.set_footer(text="WSA League")
     return embed
 
-def embed_expirado(c: dict) -> discord.Embed:
-    embed = discord.Embed(
-        color=0x992D22, title="⏰ Contrato Expirado",
-        description="Este contrato expirou. Peça ao manager para enviar uma nova proposta."
-    )
+def embed_expirado(c):
+    embed = discord.Embed(color=0x992D22, title="⏰ Contrato Expirado",
+        description="Este contrato expirou. Peça ao manager para enviar uma nova proposta.")
     embed.add_field(name="Contratado",  value=f"<@{c['signee_id']}>\n`{c['signee_name']}`",         inline=True)
     embed.add_field(name="Contratante", value=f"<@{c['contractor_id']}>\n`{c['contractor_name']}`", inline=True)
     embed.add_field(name="Contract ID", value=f"`{c['contract_id']}`",                               inline=True)
@@ -138,7 +188,6 @@ class ContratoView(discord.ui.View):
         if interaction.user.id != self.signee_id:
             await interaction.response.send_message("❌ Apenas o contratado pode aceitar este contrato.", ephemeral=True)
             return
-
         db = load_db()
         c  = db["contracts"].get(self.contract_id)
         if not c:
@@ -150,20 +199,16 @@ class ContratoView(discord.ui.View):
         if time.time() > c["expires_at"]:
             await interaction.response.send_message("⏰ Este contrato já expirou.", ephemeral=True)
             return
-
         c["status"] = "accepted"
         c["answered_at"] = time.time()
         db["history"].append(c)
         del db["contracts"][self.contract_id]
         save_db(db)
-
-        # Dar cargo
         guild  = interaction.guild
         member = guild.get_member(self.signee_id)
         role   = guild.get_role(c["role_id"]) if c.get("role_id") else None
         if member and role:
             await member.add_roles(role)
-
         await interaction.message.edit(embed=embed_aceito(c), view=None)
         await interaction.response.send_message(f"🎉 {interaction.user.mention} aceitou o contrato e foi contratado para o time **{c.get('team','—')}**!")
 
@@ -172,7 +217,6 @@ class ContratoView(discord.ui.View):
         if interaction.user.id != self.signee_id:
             await interaction.response.send_message("❌ Apenas o contratado pode recusar este contrato.", ephemeral=True)
             return
-
         db = load_db()
         c  = db["contracts"].get(self.contract_id)
         if not c:
@@ -181,69 +225,43 @@ class ContratoView(discord.ui.View):
         if c["status"] != "pending":
             await interaction.response.send_message("⚠️ Este contrato já foi processado.", ephemeral=True)
             return
-
         c["status"] = "declined"
         c["answered_at"] = time.time()
         db["history"].append(c)
         del db["contracts"][self.contract_id]
         save_db(db)
-
         await interaction.message.edit(embed=embed_recusado(c), view=None)
         await interaction.response.send_message(f"❌ {interaction.user.mention} recusou o contrato.")
 
 
 # ══════════════════════════════════════════════
-# TASK — CHECAR CONTRATOS EXPIRADOS
+# TASK — CONTRATOS EXPIRADOS
 # ══════════════════════════════════════════════
 @tasks.loop(minutes=5)
 async def checar_contratos_expirados():
     db  = load_db()
     now = time.time()
     expirados = [cid for cid, c in db["contracts"].items() if c["status"] == "pending" and now > c["expires_at"]]
-
     for cid in expirados:
         c = db["contracts"][cid]
         c["status"] = "expired"
         db["history"].append(c)
-
         try:
             channel = bot.get_channel(c["channel_id"])
             if channel and c.get("message_id"):
                 msg = await channel.fetch_message(c["message_id"])
                 await msg.edit(embed=embed_expirado(c), view=None)
         except Exception as e:
-            print(f"[WARN] Não foi possível editar contrato expirado {cid}: {e}")
-
+            print(f"[WARN] {cid}: {e}")
         del db["contracts"][cid]
-
     if expirados:
         save_db(db)
         print(f"[INFO] {len(expirados)} contrato(s) expirado(s).")
 
 
 # ══════════════════════════════════════════════
-# SISTEMA DE TICKETS
+# SISTEMA DE TICKETS — AVALIAÇÃO
 # ══════════════════════════════════════════════
-
-# ── Modal de avaliação (comentário)
-class AvaliacaoModal(discord.ui.Modal):
-    def __init__(self, nota: int, dono_id: int, canal_nome: str):
-        super().__init__(title=f"Avaliação — {nota} {'⭐' * nota}")
-        self.nota       = nota
-        self.dono_id    = dono_id
-        self.canal_nome = canal_nome
-
-    comentario = discord.ui.TextInput(
-        label="Por que você deu essa nota?",
-        placeholder="Descreva brevemente sua experiência com o atendimento...",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=500,
-    )
-
-CANAL_LOGS_AVALIACOES = 1484560745919414354
-
-# ── Modal de avaliação (comentário)
 class AvaliacaoModal(discord.ui.Modal):
     def __init__(self, nota: int, dono_id: int, canal_nome: str):
         super().__init__(title=f"Avaliação — {nota} {'⭐' * nota}")
@@ -260,10 +278,9 @@ class AvaliacaoModal(discord.ui.Modal):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        estrelas     = "⭐" * self.nota + "✩" * (5 - self.nota)
-        cor          = [0xFF4444, 0xFF8C00, 0xFFD700, 0x90EE90, 0x2ECC71][self.nota - 1]
-        descricao    = ["Muito ruim 😞", "Ruim 😕", "Regular 😐", "Bom 😊", "Excelente! 🎉"][self.nota - 1]
-
+        estrelas  = "⭐" * self.nota + "✩" * (5 - self.nota)
+        cor       = [0xFF4444, 0xFF8C00, 0xFFD700, 0x90EE90, 0x2ECC71][self.nota - 1]
+        descricao = ["Muito ruim 😞", "Ruim 😕", "Regular 😐", "Bom 😊", "Excelente! 🎉"][self.nota - 1]
         embed = discord.Embed(
             title="⭐ Nova Avaliação de Ticket",
             description=(
@@ -276,17 +293,14 @@ class AvaliacaoModal(discord.ui.Modal):
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
         embed.set_footer(text="WSA League • Avaliações de Tickets")
-
         guild = interaction.client.get_guild(GUILD_ID)
         if guild:
             canal_log = guild.get_channel(CANAL_LOGS_AVALIACOES)
             if canal_log:
                 await canal_log.send(embed=embed)
-
         await interaction.response.send_message("✅ Obrigado pela sua avaliação!", ephemeral=True)
 
 
-# ── View de avaliação com botões de estrela (enviada por DM)
 class AvaliacaoView(discord.ui.View):
     def __init__(self, dono_id: int, canal_nome: str, guild_id: int):
         super().__init__(timeout=300)
@@ -300,21 +314,16 @@ class AvaliacaoView(discord.ui.View):
 
     @discord.ui.button(label="⭐ 1", style=discord.ButtonStyle.danger,    custom_id="aval_1")
     async def aval1(self, interaction: discord.Interaction, b: discord.ui.Button): await self._avaliar(interaction, 1)
-
     @discord.ui.button(label="⭐ 2", style=discord.ButtonStyle.danger,    custom_id="aval_2")
     async def aval2(self, interaction: discord.Interaction, b: discord.ui.Button): await self._avaliar(interaction, 2)
-
     @discord.ui.button(label="⭐ 3", style=discord.ButtonStyle.secondary, custom_id="aval_3")
     async def aval3(self, interaction: discord.Interaction, b: discord.ui.Button): await self._avaliar(interaction, 3)
-
     @discord.ui.button(label="⭐ 4", style=discord.ButtonStyle.success,   custom_id="aval_4")
     async def aval4(self, interaction: discord.Interaction, b: discord.ui.Button): await self._avaliar(interaction, 4)
-
     @discord.ui.button(label="⭐ 5", style=discord.ButtonStyle.success,   custom_id="aval_5")
     async def aval5(self, interaction: discord.Interaction, b: discord.ui.Button): await self._avaliar(interaction, 5)
 
 
-# ── Helper: buscar dono do ticket pelo tópico
 def pegar_dono_id(topic: str):
     for part in (topic or "").split("|"):
         part = part.strip()
@@ -326,36 +335,31 @@ def pegar_dono_id(topic: str):
     return None
 
 
+# ══════════════════════════════════════════════
+# TICKET VIEW (3 botões)
+# ══════════════════════════════════════════════
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔒 Fechar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_fechar_ticket", row=0)
     async def fechar_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Apenas staff/admin pode fechar
         eh_suporte = any(r.id in CARGOS_SUPORTE for r in interaction.user.roles)
         eh_admin   = interaction.user.guild_permissions.administrator
         if not (eh_suporte or eh_admin):
             await interaction.response.send_message("❌ Apenas a staff pode fechar o ticket!", ephemeral=True)
             return
-
         tickets_assumidos.pop(interaction.channel.id, None)
-
-        # Pega o dono do ticket para enviar avaliação
         dono_id    = pegar_dono_id(interaction.channel.topic or "")
         canal_nome = interaction.channel.name
-
         embed = discord.Embed(
             description=f"🔒 Ticket fechado por {interaction.user.mention}.\nO canal será deletado em **5 segundos**.",
             color=0xFF4444,
         )
         await interaction.response.send_message(embed=embed)
-
-        # Envia DM de avaliação para o dono
         if dono_id:
             try:
-                guild  = interaction.guild
-                membro = guild.get_member(dono_id)
+                membro = interaction.guild.get_member(dono_id)
                 if membro:
                     embed_dm = discord.Embed(
                         title="🔒 Seu Ticket Foi Encerrado",
@@ -364,16 +368,15 @@ class TicketView(discord.ui.View):
                             f"**Fechado por:** {interaction.user.mention}\n"
                             f"**Data:** {datetime.datetime.now().strftime('%d/%m/%Y, %H:%M')}\n\n"
                             f"⭐ **Como foi o nosso atendimento?**\n"
-                            f"Clique em uma estrela abaixo e depois escreva o motivo da sua nota:"
+                            f"Clique em uma estrela abaixo e escreva o motivo da sua nota:"
                         ),
                         color=0xFF6600,
                     )
                     embed_dm.set_thumbnail(url=LOGO_URL)
                     embed_dm.set_footer(text="WSA League • Ticket System")
-                    await membro.send(embed=embed_dm, view=AvaliacaoView(dono_id, canal_nome, guild.id))
+                    await membro.send(embed=embed_dm, view=AvaliacaoView(dono_id, canal_nome, interaction.guild.id))
             except Exception:
-                pass  # DM desativada, ignora
-
+                pass
         await discord.utils.sleep_until(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=5))
         await interaction.channel.delete(reason=f"Ticket fechado por {interaction.user}")
 
@@ -427,16 +430,9 @@ class PainelStaffSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "notificar_membro":
-            topic = interaction.channel.topic or ""
-            dono_id = None
-            for part in topic.split("|"):
-                part = part.strip()
-                if part.startswith("ID:"):
-                    try: dono_id = int(part.replace("ID:", "").strip())
-                    except ValueError: pass
-            mencao = f"<@{dono_id}>" if dono_id else "membro"
+            dono_id = pegar_dono_id(interaction.channel.topic or "")
+            mencao  = f"<@{dono_id}>" if dono_id else "membro"
             await interaction.response.send_message(f"📣 {interaction.user.mention} está chamando o {mencao}!\n{mencao}, a staff precisa de você no ticket!")
-
         elif self.values[0] == "assumir_ticket":
             canal_id = interaction.channel.id
             if canal_id in tickets_assumidos:
@@ -445,14 +441,8 @@ class PainelStaffSelect(discord.ui.Select):
                 await interaction.response.send_message(msg, ephemeral=True)
                 return
             tickets_assumidos[canal_id] = interaction.user.id
-            topic = interaction.channel.topic or ""
-            dono_id = None
-            for part in topic.split("|"):
-                part = part.strip()
-                if part.startswith("ID:"):
-                    try: dono_id = int(part.replace("ID:", "").strip())
-                    except ValueError: pass
-            mencao = f"<@{dono_id}>" if dono_id else ""
+            dono_id = pegar_dono_id(interaction.channel.topic or "")
+            mencao  = f"<@{dono_id}>" if dono_id else ""
             await interaction.response.send_message(f"✋ {interaction.user.mention} assumiu este ticket e irá te atender!\n{mencao} seu ticket agora está sendo atendido por {interaction.user.mention}.")
 
 class PainelStaffView(discord.ui.View):
@@ -514,12 +504,10 @@ async def criar_canal_ticket(interaction: discord.Interaction, categoria_key: st
     cat   = CATEGORIAS[categoria_key]
     prefixo    = categoria_key.replace("_", "-")
     nome_canal = f"{prefixo}-{interaction.user.name.lower().replace(' ', '-')}"
-
     canal_existente = discord.utils.get(guild.text_channels, name=nome_canal)
     if canal_existente:
         await interaction.followup.send(f"❌ Você já tem um ticket aberto em {canal_existente.mention}!", ephemeral=True)
         return
-
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         interaction.user:   discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -529,13 +517,11 @@ async def criar_canal_ticket(interaction: discord.Interaction, categoria_key: st
         cargo = guild.get_role(cargo_id)
         if cargo:
             overwrites[cargo] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-
     canal_ticket = await guild.create_text_channel(
         name=nome_canal, overwrites=overwrites,
         category=guild.get_channel(CATEGORIA_TICKETS_ID),
         topic=f"Ticket de {interaction.user.display_name} | Categoria: {cat['label']} | ID: {interaction.user.id}",
     )
-
     mencoes = " ".join(f"<@&{cid}>" for cid in CARGOS_SUPORTE if guild.get_role(cid))
     embed = discord.Embed(
         description=(
@@ -556,7 +542,7 @@ async def criar_canal_ticket(interaction: discord.Interaction, categoria_key: st
 
 
 # ══════════════════════════════════════════════
-# COMANDOS — TICKETS
+# COMANDOS
 # ══════════════════════════════════════════════
 @bot.tree.command(name="aviso", description="📢 Envia um aviso oficial no canal")
 @app_commands.default_permissions(administrator=True)
@@ -608,33 +594,12 @@ async def ticket(interaction: discord.Interaction, canal: discord.TextChannel = 
     await interaction.followup.send(f"✅ Painel de ticket enviado em {canal_alvo.mention}!", ephemeral=True)
 
 
-# ══════════════════════════════════════════════
-# COMANDOS — CONTRATAÇÃO
-# ══════════════════════════════════════════════
-# Cargos de times permitidos no /contratar
-CARGOS_TIMES = [
-    1484546866233344111,
-    1484546933115715636,
-    1484546961184129024,
-    1484546994797023313,
-    1484547020260905130,
-    1484547051889885356,
-    1484547078624514131,
-    1484547111264456797,
-]
-
 @bot.tree.command(name="contratar", description="📝 Envia uma proposta de contrato para um membro")
 @app_commands.default_permissions(manage_roles=True)
-@app_commands.describe(
-    membro="O usuário que você quer contratar",
-    nome_time="Nome do time",
-    posicao="Posição (ex: Atacante, Goleiro...)",
-    cargo="Cargo de time que será dado ao contratado",
-)
+@app_commands.describe(membro="O usuário que você quer contratar", nome_time="Nome do time", posicao="Posição (ex: Atacante, Goleiro...)", cargo="Cargo de time que será dado ao contratado")
 async def contratar(interaction: discord.Interaction, membro: discord.Member, nome_time: str, posicao: str, cargo: discord.Role):
     manager_role = interaction.guild.get_role(MANAGER_ROLE_ID)
-    tem_cargo    = manager_role is not None and manager_role in interaction.user.roles
-    if not tem_cargo:
+    if not (manager_role and manager_role in interaction.user.roles):
         await interaction.response.send_message("❌ Você precisa ter o cargo de **Manager** para contratar membros!", ephemeral=True)
         return
     if membro.bot:
@@ -645,58 +610,33 @@ async def contratar(interaction: discord.Interaction, membro: discord.Member, no
         return
     if cargo.id not in CARGOS_TIMES:
         cargos_mencoes = "\n".join(f"<@&{cid}>" for cid in CARGOS_TIMES if interaction.guild.get_role(cid))
-        await interaction.response.send_message(
-            f"❌ O cargo selecionado não é um cargo de time válido!\n\n**Cargos permitidos:**\n{cargos_mencoes}",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"❌ Cargo inválido! **Cargos permitidos:**\n{cargos_mencoes}", ephemeral=True)
         return
-
     contract_id = gerar_contract_id(membro.id, interaction.user.id)
     now         = time.time()
     expires_at  = now + (CONTRACT_EXPIRY_HOURS * 3600)
-
     c = {
-        "contract_id":    contract_id,
-        "signee_id":      membro.id,
-        "signee_name":    membro.name,
-        "contractor_id":  interaction.user.id,
-        "contractor_name": interaction.user.name,
-        "team":           nome_time,
-        "position":       posicao,
-        "role":           cargo.name,
-        "role_id":        cargo.id,
-        "status":         "pending",
-        "created_at":     now,
-        "expires_at":     expires_at,
-        "message_id":     None,
-        "channel_id":     CANAL_CONTRATOS_ID,
+        "contract_id": contract_id, "signee_id": membro.id, "signee_name": membro.name,
+        "contractor_id": interaction.user.id, "contractor_name": interaction.user.name,
+        "team": nome_time, "position": posicao, "role": cargo.name, "role_id": cargo.id,
+        "status": "pending", "created_at": now, "expires_at": expires_at,
+        "message_id": None, "channel_id": CANAL_CONTRATOS_ID,
     }
-
     db = load_db()
     db["contracts"][contract_id] = c
     save_db(db)
-
     embed = embed_contrato_pendente(c)
     view  = ContratoView(contract_id, membro.id, interaction.user.id)
-
     canal_contratos = interaction.guild.get_channel(CANAL_CONTRATOS_ID)
-    if canal_contratos is None:
-        await interaction.response.send_message("❌ Canal de contratos não encontrado. Verifique o `CANAL_CONTRATOS_ID`.", ephemeral=True)
+    if not canal_contratos:
+        await interaction.response.send_message("❌ Canal de contratos não encontrado.", ephemeral=True)
         return
-
     if interaction.channel_id != CANAL_CONTRATOS_ID:
         await interaction.response.send_message("✅ Contrato enviado!", ephemeral=True)
-        msg = await canal_contratos.send(
-            content=f"{membro.mention}, você recebeu uma proposta de contrato de {interaction.user.mention}!",
-            embed=embed, view=view,
-        )
+        msg = await canal_contratos.send(content=f"{membro.mention}, você recebeu uma proposta de contrato de {interaction.user.mention}!", embed=embed, view=view)
     else:
-        await interaction.response.send_message(
-            content=f"{membro.mention}, você recebeu uma proposta de contrato de {interaction.user.mention}!",
-            embed=embed, view=view,
-        )
+        await interaction.response.send_message(content=f"{membro.mention}, você recebeu uma proposta de contrato de {interaction.user.mention}!", embed=embed, view=view)
         msg = await interaction.original_response()
-
     db = load_db()
     if contract_id in db["contracts"]:
         db["contracts"][contract_id]["message_id"] = msg.id
@@ -718,11 +658,7 @@ async def contratos_ativos(interaction: discord.Interaction):
     embed = discord.Embed(title="⏳ Contratos Pendentes — WSA League", color=0xFF6600)
     for c in pending:
         expires = datetime.datetime.fromtimestamp(c["expires_at"]).strftime("%d/%m %H:%M")
-        embed.add_field(
-            name=f"🔸 {c.get('team','—')} — {c['position']}",
-            value=f"<@{c['signee_id']}> ← <@{c['contractor_id']}>\nExpira: `{expires}`",
-            inline=False,
-        )
+        embed.add_field(name=f"🔸 {c.get('team','—')} — {c['position']}", value=f"<@{c['signee_id']}> ← <@{c['contractor_id']}>\nExpira: `{expires}`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -740,11 +676,7 @@ async def historico_contratos(interaction: discord.Interaction, membro: discord.
     embed = discord.Embed(title="📋 Histórico de Contratos — WSA League", color=0xFF6600)
     for c in list(reversed(history))[:10]:
         emoji = {"accepted": "✅", "declined": "❌", "expired": "⏰", "cancelled": "🗑️"}.get(c["status"], "❓")
-        embed.add_field(
-            name=f"{emoji} {c.get('team','—')} — {c.get('position','—')}",
-            value=f"<@{c['signee_id']}> ← <@{c['contractor_id']}>\n`{c['status'].upper()}`",
-            inline=False,
-        )
+        embed.add_field(name=f"{emoji} {c.get('team','—')} — {c.get('position','—')}", value=f"<@{c['signee_id']}> ← <@{c['contractor_id']}>\n`{c['status'].upper()}`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -757,7 +689,7 @@ async def cancelar_contrato(interaction: discord.Interaction, contract_id: str):
     if not c:
         await interaction.response.send_message("❌ Contrato não encontrado.", ephemeral=True)
         return
-    manager_role = interaction.guild.get_role(MANAGER_ROLE_ID)
+    manager_role  = interaction.guild.get_role(MANAGER_ROLE_ID)
     is_contractor = interaction.user.id == c["contractor_id"]
     is_manager    = manager_role in interaction.user.roles or interaction.user.guild_permissions.administrator
     if not (is_contractor or is_manager):
@@ -782,20 +714,15 @@ async def on_ready():
     bot.add_view(ContratoView("dummy", 0, 0))
 
     guild = discord.Object(id=GUILD_ID)
-
-    # Limpa comandos antigos e força resync completo
     bot.tree.clear_commands(guild=guild)
     bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
-
     checar_contratos_expirados.start()
     print(f"✅ Bot online como: {bot.user}")
     print(f"📡 {len(synced)} comandos sincronizados:")
     for cmd in synced:
         print(f"   /{cmd.name}")
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="WSA League"))
-
-
 
 
 # ══════════════════════════════════════════════
