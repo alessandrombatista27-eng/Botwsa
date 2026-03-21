@@ -306,16 +306,16 @@ client.on("interactionCreate", async (interaction) => {
     // /contratar
     else if (cmd === "contratar") {
       if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID))
-        return interaction.reply({ content: "❌ Você precisa ter o cargo de **Manager**!", ephemeral: true });
+        return interaction.reply({ content: "❌ Você precisa ter o cargo de **Manager**!", flags: MessageFlags.Ephemeral });
       const membro   = interaction.options.getMember("membro");
       const nomeTime = interaction.options.getString("nome_time");
       const posicao  = interaction.options.getString("posicao");
       const cargo    = interaction.options.getRole("cargo");
-      if (membro.user.bot) return interaction.reply({ content: "❌ Não pode contratar um bot.", ephemeral: true });
-      if (membro.id === interaction.user.id) return interaction.reply({ content: "❌ Não pode contratar a si mesmo.", ephemeral: true });
+      if (membro.user.bot) return interaction.reply({ content: "❌ Não pode contratar um bot.", flags: MessageFlags.Ephemeral });
+      if (membro.id === interaction.user.id) return interaction.reply({ content: "❌ Não pode contratar a si mesmo.", flags: MessageFlags.Ephemeral });
       if (!CARGOS_TIMES.includes(cargo.id)) {
         const lista = CARGOS_TIMES.map(id => `<@&${id}>`).join("\n");
-        return interaction.reply({ content: `❌ Cargo inválido!\n**Cargos permitidos:**\n${lista}`, ephemeral: true });
+        return interaction.reply({ content: `❌ Cargo inválido!\n**Cargos permitidos:**\n${lista}`, flags: MessageFlags.Ephemeral });
       }
       const contractId = gerarContractId(membro.id, interaction.user.id);
       const now        = Date.now() / 1000;
@@ -328,10 +328,10 @@ client.on("interactionCreate", async (interaction) => {
       };
       const db = loadDB(); db.contracts[contractId] = c; saveDB(db);
       const chContratos = interaction.guild.channels.cache.get(CANAL_CONTRATOS_ID);
-      if (!chContratos) return interaction.reply({ content: "❌ Canal de contratos não encontrado.", ephemeral: true });
+      if (!chContratos) return interaction.reply({ content: "❌ Canal de contratos não encontrado.", flags: MessageFlags.Ephemeral });
 
       // Responde confirmação ephemeral e envia no canal de contratos
-      await interaction.reply({ content: "✅ Contrato enviado!", ephemeral: true });
+      await interaction.reply({ content: "✅ Contrato enviado!", flags: MessageFlags.Ephemeral });
       const payload = payContratoPendente(c);
       const msg = await chContratos.send({
         content: `${membro}, você recebeu uma proposta de contrato de ${interaction.user}!`,
@@ -345,10 +345,10 @@ client.on("interactionCreate", async (interaction) => {
     // /contratos-ativos
     else if (cmd === "contratos-ativos") {
       if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+        return interaction.reply({ content: "❌ Sem permissão.", flags: MessageFlags.Ephemeral });
       const db      = loadDB();
       const pending = Object.values(db.contracts).filter(c => c.status === "pending");
-      if (!pending.length) return interaction.reply({ content: "✅ Nenhum contrato pendente.", ephemeral: true });
+      if (!pending.length) return interaction.reply({ content: "✅ Nenhum contrato pendente.", flags: MessageFlags.Ephemeral });
       const linhas = pending.map(c => `🔸 **${c.team}** — ${c.position}\n<@${c.signee_id}> ← <@${c.contractor_id}>\nExpira: \`${new Date(c.expires_at*1000).toLocaleString("pt-BR")}\``).join("\n\n");
       await interaction.reply({ flags: CV2 | EPH, components: [container([txt(`## ⏳ Contratos Pendentes — WSA League\n\n${linhas}`)])] });
     }
@@ -359,7 +359,7 @@ client.on("interactionCreate", async (interaction) => {
       let hist  = db.history || [];
       const u   = interaction.options.getUser("membro");
       if (u) hist = hist.filter(c => c.signee_id === u.id || c.contractor_id === u.id);
-      if (!hist.length) return interaction.reply({ content: "📭 Nenhum contrato encontrado.", ephemeral: true });
+      if (!hist.length) return interaction.reply({ content: "📭 Nenhum contrato encontrado.", flags: MessageFlags.Ephemeral });
       const emj = { accepted:"✅", declined:"❌", expired:"⏰", cancelled:"🗑️" };
       const linhas = hist.slice(-10).reverse().map(c => `${emj[c.status]||"❓"} **${c.team||"—"}** — ${c.position||"—"}\n<@${c.signee_id}> ← <@${c.contractor_id}> \`${c.status.toUpperCase()}\``).join("\n\n");
       await interaction.reply({ flags: CV2 | EPH, components: [container([txt(`## 📋 Histórico de Contratos — WSA League\n\n${linhas}`)])] });
@@ -370,11 +370,11 @@ client.on("interactionCreate", async (interaction) => {
       const cid = interaction.options.getString("contract_id");
       const db  = loadDB();
       const c   = db.contracts[cid];
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: MessageFlags.Ephemeral });
       const ok = interaction.user.id === c.contractor_id || interaction.member.roles.cache.has(MANAGER_ROLE_ID) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-      if (!ok) return interaction.reply({ content: "❌ Apenas quem enviou pode cancelar.", ephemeral: true });
+      if (!ok) return interaction.reply({ content: "❌ Apenas quem enviou pode cancelar.", flags: MessageFlags.Ephemeral });
       c.status = "cancelled"; db.history.push(c); delete db.contracts[cid]; saveDB(db);
-      await interaction.reply({ content: `🗑️ Contrato \`${cid}\` cancelado.`, ephemeral: true });
+      await interaction.reply({ content: `🗑️ Contrato \`${cid}\` cancelado.`, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -385,10 +385,10 @@ client.on("interactionCreate", async (interaction) => {
     if (id === "btn_aceitar_contrato") {
       const db = loadDB();
       const c  = Object.values(db.contracts).find(x => x.message_id === interaction.message.id);
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
-      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode aceitar.", ephemeral: true });
-      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", ephemeral: true });
-      if (Date.now()/1000 > c.expires_at) return interaction.reply({ content: "⏰ Contrato expirado.", ephemeral: true });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: MessageFlags.Ephemeral });
+      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode aceitar.", flags: MessageFlags.Ephemeral });
+      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", flags: MessageFlags.Ephemeral });
+      if (Date.now()/1000 > c.expires_at) return interaction.reply({ content: "⏰ Contrato expirado.", flags: MessageFlags.Ephemeral });
       c.status = "accepted"; c.answered_at = Date.now()/1000; db.history.push(c); delete db.contracts[c.contract_id]; saveDB(db);
       const member = interaction.guild.members.cache.get(c.signee_id);
       const role   = interaction.guild.roles.cache.get(String(c.role_id));
@@ -401,9 +401,9 @@ client.on("interactionCreate", async (interaction) => {
     else if (id === "btn_recusar_contrato") {
       const db = loadDB();
       const c  = Object.values(db.contracts).find(x => x.message_id === interaction.message.id);
-      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", ephemeral: true });
-      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode recusar.", ephemeral: true });
-      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", ephemeral: true });
+      if (!c) return interaction.reply({ content: "❌ Contrato não encontrado.", flags: MessageFlags.Ephemeral });
+      if (interaction.user.id !== c.signee_id) return interaction.reply({ content: "❌ Apenas o contratado pode recusar.", flags: MessageFlags.Ephemeral });
+      if (c.status !== "pending") return interaction.reply({ content: "⚠️ Contrato já processado.", flags: MessageFlags.Ephemeral });
       c.status = "declined"; c.answered_at = Date.now()/1000; db.history.push(c); delete db.contracts[c.contract_id]; saveDB(db);
       const pay = payContratoRecusado(c);
       await interaction.message.edit({ flags: pay.flags, components: pay.components });
@@ -413,7 +413,7 @@ client.on("interactionCreate", async (interaction) => {
     else if (id === "btn_fechar_ticket") {
       const ehSuporte = CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id));
       const ehAdmin   = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-      if (!ehSuporte && !ehAdmin) return interaction.reply({ content: "❌ Apenas a staff pode fechar o ticket!", ephemeral: true });
+      if (!ehSuporte && !ehAdmin) return interaction.reply({ content: "❌ Apenas a staff pode fechar o ticket!", flags: MessageFlags.Ephemeral });
       ticketsAssumidos.delete(interaction.channelId);
       const donoId    = pegarDonoId(interaction.channel.topic || "");
       const canalNome = interaction.channel.name;
@@ -438,7 +438,7 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (id === "btn_painel_membro") {
       if (CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id)))
-        return interaction.reply({ content: "❌ Este painel é exclusivo para membros!", ephemeral: true });
+        return interaction.reply({ content: "❌ Este painel é exclusivo para membros!", flags: MessageFlags.Ephemeral });
       await interaction.reply({
         flags: CV2 | EPH,
         components: [container([txt("👤 **Painel Membro**\n\nUse as opções abaixo para interagir com a staff:")], 0x5865F2), rowDropdownMembro()],
@@ -448,7 +448,7 @@ client.on("interactionCreate", async (interaction) => {
     else if (id === "btn_painel_staff") {
       const ehSuporte = CARGOS_SUPORTE.some(id => interaction.member.roles.cache.has(id));
       if (!ehSuporte && !interaction.member.permissions.has(PermissionFlagsBits.Administrator))
-        return interaction.reply({ content: "❌ Este painel é exclusivo para a staff!", ephemeral: true });
+        return interaction.reply({ content: "❌ Este painel é exclusivo para a staff!", flags: MessageFlags.Ephemeral });
       await interaction.reply({
         flags: CV2 | EPH,
         components: [container([txt("👮 **Painel Staff**\n\nUse as opções abaixo para interagir com o membro:")]), rowDropdownStaff()],
@@ -512,7 +512,7 @@ client.on("interactionCreate", async (interaction) => {
         const cid = interaction.channelId;
         if (ticketsAssumidos.has(cid)) {
           const rid = ticketsAssumidos.get(cid);
-          return interaction.reply({ content: rid === interaction.user.id ? "⚠️ Você já é o responsável!" : `⚠️ Este ticket já foi assumido por <@${rid}>!`, ephemeral: true });
+          return interaction.reply({ content: rid === interaction.user.id ? "⚠️ Você já é o responsável!" : `⚠️ Este ticket já foi assumido por <@${rid}>!`, flags: MessageFlags.Ephemeral });
         }
         ticketsAssumidos.set(cid, interaction.user.id);
         const donoId = pegarDonoId(interaction.channel.topic || "");
@@ -540,7 +540,7 @@ client.on("interactionCreate", async (interaction) => {
           components: [container([txt(`## ⭐ Nova Avaliação de Ticket\n\n**Usuário:** <@${donoId}>\n**Nota:** ${estrelas} \`${nota}/5\` — ${descricoes[nota-1]}\n\n**Comentário:**\n> ${comentario}\n\n*${new Date().toLocaleString("pt-BR")}*`)], cores[nota-1])],
         });
       }
-      await interaction.reply({ content: "✅ Obrigado pela sua avaliação!", ephemeral: true });
+      await interaction.reply({ content: "✅ Obrigado pela sua avaliação!", flags: MessageFlags.Ephemeral });
     }
   }
 });
@@ -558,4 +558,5 @@ client.once("clientReady", async () => {
   client.user.setActivity("WSA League", { type: 3 });
 });
 
+process.on("unhandledRejection", (err) => console.error("[ERROR]", err));
 client.login(TOKEN);
