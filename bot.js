@@ -102,7 +102,7 @@ function payContratoPendente(c) {
   const issued  = new Date(c.created_at*1000).toLocaleString("pt-BR");
   const expires = new Date(c.expires_at*1000).toLocaleString("pt-BR");
   return { flags: CV2, components: [
-    container([thumb(LOGO_URL), txt("## 📋 Proposta de Contrato — WSA League"), sep(),
+    container([txt("## 📋 Proposta de Contrato — WSA League"), sep(),
       txt(`**Contratado:** <@${c.signee_id}> \`${c.signee_name}\`\n**Contratante:** <@${c.contractor_id}> \`${c.contractor_name}\`\n**Contract ID:** \`${c.contract_id}\`\n\n**Time:** ${c.team}\n**Posição:** ${c.position}\n**Cargo:** ${c.role}\n\n*Emitido: ${issued} • Expira: ${expires}*`)]),
     rowBotoesContrato(),
   ]};
@@ -145,7 +145,7 @@ async function criarCanalTicket(interaction, categoriaKey) {
     content: `<@${interaction.user.id}> ${mencoes}`,
     flags: CV2,
     components: [
-      container([thumb(LOGO_URL), txt(`# ${cat.emoji} ${cat.label}\n\nOlá <@${interaction.user.id}>! A equipe de suporte irá te atender em breve.\n\n**Categoria:** ${cat.emoji} ${cat.label}\n**Descrição:** ${cat.description}\n\nDescreva sua situação com o máximo de detalhes possível.\n\n⏰ Horário de atendimento: **08:00 às 22:00**`)]),
+      container([txt(`# ${cat.emoji} ${cat.label}\n\nOlá <@${interaction.user.id}>! A equipe de suporte irá te atender em breve.\n\n**Categoria:** ${cat.emoji} ${cat.label}\n**Descrição:** ${cat.description}\n\nDescreva sua situação com o máximo de detalhes possível.\n\n⏰ Horário de atendimento: **08:00 às 22:00**`)]),
       rowBotoesTicket(),
     ],
   });
@@ -226,7 +226,7 @@ client.on("interactionCreate", async interaction => {
       const titulo    = interaction.options.getString("titulo");
       const descricao = interaction.options.getString("descricao");
       const ch        = interaction.options.getChannel("canal") || interaction.channel;
-      await sendRaw(ch.id, { content: "@everyone", flags: CV2, components: [container([thumb(LOGO_URL), txt(`# ${titulo}\n\n${descricao}`), sep(), txt(`*Aviso emitido por ${interaction.user.displayName}*`)])] });
+      await sendRaw(ch.id, { content: "@everyone", flags: CV2, components: [container([txt(`# ${titulo}\n\n${descricao}`), sep(), txt(`*Aviso emitido por ${interaction.user.displayName}*`)])] });
       await editReplyRaw(interaction, { content: `✅ Aviso enviado em <#${ch.id}>!` });
     }
 
@@ -234,7 +234,7 @@ client.on("interactionCreate", async interaction => {
       await deferRaw(interaction, EPH);
       const ch = interaction.options.getChannel("canal") || interaction.channel;
       await sendRaw(ch.id, { flags: CV2, components: [
-        container([thumb(LOGO_URL), txt(`# 🎫 | Ajuda e Suporte\n\n**A equipe *WSA* estará sempre pronta para atender o seu ticket, portanto, precisamos que você tenha paciência e calma ao nos relatar.**\n\n─\n\n- 🤔 **Dúvidas** — Perguntas gerais sobre a liga ou o servidor\n- 🤝 **Parcerias** — Propostas de parceria e divulgações\n- 🚨 **Denúncias** — Denunciar algum usuário do servidor\n- 🏆 **Ownar Clube** — Solicitar ownership de um clube\n- 📌 **Outros** — Outros assuntos não listados acima\n\n─\n\n> ⏳ O horário de atendimento do seu ticket será de **8:00 às 22:00**, fora esse horário a equipe não tem obrigação de responde-lo.\n\n*A equipe WSA agradece.*`)]),
+        container([txt(`# 🎫 | Ajuda e Suporte\n\n**A equipe *WSA* estará sempre pronta para atender o seu ticket, portanto, precisamos que você tenha paciência e calma ao nos relatar.**\n\n─\n\n- 🤔 **Dúvidas** — Perguntas gerais sobre a liga ou o servidor\n- 🤝 **Parcerias** — Propostas de parceria e divulgações\n- 🚨 **Denúncias** — Denunciar algum usuário do servidor\n- 🏆 **Ownar Clube** — Solicitar ownership de um clube\n- 📌 **Outros** — Outros assuntos não listados acima\n\n─\n\n> ⏳ O horário de atendimento do seu ticket será de **8:00 às 22:00**, fora esse horário a equipe não tem obrigação de responde-lo.\n\n*A equipe WSA agradece.*`)]),
         rowSelectTicket(),
       ]});
       await editReplyRaw(interaction, { content: `✅ Painel enviado em <#${ch.id}>!` });
@@ -319,7 +319,7 @@ client.on("interactionCreate", async interaction => {
       const donoId=pegarDonoId(interaction.channel.topic||""), canalNome=interaction.channel.name;
       await replyRaw(interaction,{flags:CV2,components:[container([txt(`🔒 Ticket fechado por <@${interaction.user.id}>.\nO canal será deletado em **5 segundos**.`)],0xFF4444)]});
       if(donoId) {
-        try { await dmRaw(donoId,{flags:CV2,components:[container([thumb(LOGO_URL),txt(`## 🔒 Seu Ticket Foi Encerrado\n\n**Ticket:** \`${canalNome}\`\n**Fechado por:** <@${interaction.user.id}>\n**Data:** ${new Date().toLocaleString("pt-BR")}\n\n⭐ **Como foi o nosso atendimento?**\nClique em uma estrela abaixo e escreva o motivo da sua nota:`)]),rowAvaliacao()]}); } catch {}
+        try { await dmRaw(donoId,{flags:CV2,components:[container([txt(`## 🔒 Seu Ticket Foi Encerrado\n\n**Ticket:** \`${canalNome}\`\n**Fechado por:** <@${interaction.user.id}>\n**Data:** ${new Date().toLocaleString("pt-BR")}\n\n⭐ **Como foi o nosso atendimento?**\nClique em uma estrela abaixo e escreva o motivo da sua nota:`)]),rowAvaliacao()]}); } catch {}
       }
       setTimeout(()=>interaction.channel.delete().catch(()=>{}),5000);
     }
