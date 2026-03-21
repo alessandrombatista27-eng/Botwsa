@@ -768,7 +768,7 @@ client.on("interactionCreate", async (interaction) => {
 // ──────────────────────────────────────────────
 // READY
 // ──────────────────────────────────────────────
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`✅ Bot online como: ${client.user.tag}`);
 
   // Registrar comandos na guild
