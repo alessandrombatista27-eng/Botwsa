@@ -25,6 +25,8 @@ CARGOS_SUPORTE = [
     1483576832585367572,
     1483576833600393317,
     1483576834544369794,
+    1483576843239165963,
+    1483576844245663814,
 ]
 CATEGORIA_TICKETS_ID  = 1483980064910606386
 CANAL_LOGS_AVALIACOES = 1484560745919414354
@@ -80,7 +82,6 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Ignora admins e suporte
     if message.guild:
         member = message.guild.get_member(message.author.id)
         if member:
